@@ -5,7 +5,7 @@
 - A novel radiology report generation framework to relieve data bias and enhance cross-modal interaction.
 - A novel recalibrated visual extractor to capture fine-grained visual features related to anomaly findings in radiological images.
 - A cross-modal gated memory matrix to memorize interactions between different modalities selectively.
--A weakly supervised contrastive learning method to assist the model in learning useful medical image representations. 
+- A weakly supervised contrastive learning method to assist the model in learning useful medical image representations. 
 
 ## Requirements
 - `Python >= 3.6`
