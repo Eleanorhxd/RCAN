@@ -14,7 +14,7 @@
 
 ## Data
 
-Download IU X-Rayand MIMIC-CXR datasets, and place them in `data` folder.
+Download IU X-Ray and MIMIC-CXR datasets, and place them in `data` folder.
 
 - IU X-Ray dataset is available  from [here](https://iuhealth.org/find-medical-services/x-rays)
 - MIMIC-CXR dataset is available from [here](https://physionet.org/content/mimic-cxr-jpg/2.0.0/)
