@@ -1,0 +1,117 @@
+import numpy as np
+import torch
+import torch.nn as nn
+
+from modules.base_cmn import BaseCMN
+from modules.head import ProjectionHead
+import torch.nn.functional as F
+from modules.visual_extractor import VisualExtractor
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
+from modules.gcn import GCN
+from modules.attention import ClsAttention
+from modules.wcl import WCL
+
+
+class RCANmodel(nn.Module):
+    def __init__(self, args, tokenizer):
+        super(BaseCMNModel, self).__init__()
+        self.args = args
+        self.tokenizer = tokenizer
+        self.visual_extractor = VisualExtractor(args)
+        self.encoder_decoder = BaseCMN(args, tokenizer)
+        self.wcl = WCL()
+        self.gcn = GCN(2048, 512)
+        self.cls_atten = ClsAttention(2048, args.num_classes)
+        self.ziji = torch.nn.Linear(62, 98) # (62,98)
+
+    
+        if args.dataset_name == 'iu_xray':
+            self.forward = self.forward_iu_xray
+        else:
+            self.forward = self.forward_mimic_cxr
+
+    def __str__(self):
+        model_parameters = filter(lambda p: p.requires_grad, self.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        return super().__str__() + '\nTrainable parameters: {}'.format(params)
+
+    def forward_iu_xray(self, images, targets=None, mode='train', update_opts={}):
+        # fw_A = self.fw_A.repeat(8, 1, 1)
+        # bw_A = self.bw_A.repeat(8, 1, 1)
+        att_feats_0, fc_feats_0, w_feats_0 = self.visual_extractor(images[:, 0])
+        att_feats_1, fc_feats_1, w_feats_1 = self.visual_extractor(images[:, 1])
+        
+        # att_feats_0 = self.cls_atten(att_feats_0)
+        # att_feats_1 = self.cls_atten(att_feats_1)
+        #
+        # att_feats_0 = self.gcn(att_feats_0, fw_A, bw_A)
+        # att_feats_1 = self.gcn(att_feats_1, fw_A, bw_A)        
+        fc_feats = torch.cat((fc_feats_0, fc_feats_1), dim=1)
+        att_feats = torch.cat((att_feats_0, att_feats_1), dim=1)
+        # att_feats = self.ziji(att_feats.transpose(1, 2)).transpose(1, 2)
+
+        if mode == 'train':
+            output = self.encoder_decoder(fc_feats, att_feats, targets, mode='forward')
+            graph_loss = self.wcl(w_feats_0, w_feats_1)
+            return output, graph_loss
+            # return output
+        elif mode == 'sample':
+            output, output_probs = self.encoder_decoder(fc_feats, att_feats, mode='sample', update_opts=update_opts)
+            return output, output_probs
+        else:
+            raise ValueError
+
+    def forward_mimic_cxr(self, images, targets=None, mode='train', update_opts={}):
+        att_feats, fc_feats, w_feats = self.visual_extractor(images)
+        if mode == 'train':
+            output = self.encoder_decoder(fc_feats, att_feats, targets, mode='forward')
+            graph_loss = self.wcl(w_feats, w_feats)
+            return output,graph_loss
+            # return output
+        elif mode == 'sample':
+            output, output_probs = self.encoder_decoder(fc_feats, att_feats, mode='sample', update_opts=update_opts)
+            return output, output_probs
+        else:
+            raise ValueError
+
+def concat_other_gather(tensor):
+    """
+    Performs the all_gather operation on the provided tensor.
+    This version assumes non-distributed setting.
+    """
+    world_size = 1  # 单个进程，非分布式设置
+
+    tensors_gather = [torch.ones_like(tensor) for _ in range(world_size)]
+    tensors_gather[0] = tensor
+
+    # Concatenate tensors in a single process
+    other = torch.cat(tensors_gather, dim=0)
+
+    return other
+
+import torch
+
+@torch.no_grad()
+def concat_all_gather(tensor, replace=True):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    # 将原来的 torch.distributed.get_rank() 替换为 0
+    rank = 0
+
+    # 创建一个与输入张量相同形状的临时张量
+    tensors_gather = [torch.ones_like(tensor)
+        for _ in range(1)]
+
+    # 复制输入张量到临时张量列表中
+    tensors_gather[0] = tensor.clone()
+
+    # 如果替换为True，则将当前进程的张量替换为输入张量
+    if replace:
+        tensors_gather[rank] = tensor
+
+    # 将临时张量列表拼接起来
+    other = torch.cat(tensors_gather, dim=0)
+    return other
